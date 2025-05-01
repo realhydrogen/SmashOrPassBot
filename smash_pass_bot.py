@@ -64,7 +64,8 @@ async def smash(ctx, gender="female"):
     except:
         font = ImageFont.load_default()
     text = "VS"
-    text_width, text_height = draw.textsize(text, font=font)
+    bbox = font.getbbox(text)
+    text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw.text(((310 - text_width // 2), (225 - text_height // 2)), text, fill=(255, 255, 255), font=font)
 
     # Save to memory
