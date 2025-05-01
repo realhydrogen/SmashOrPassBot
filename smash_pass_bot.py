@@ -11,6 +11,9 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import wikipediaapi
+
+wiki = wikipediaapi.Wikipedia('en')
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -63,17 +66,74 @@ async def get_tmdb_celeb(gender="female"):
                 "image": f"https://image.tmdb.org/t/p/w500{celeb['profile_path']}"
             }
 
+async def get_wiki_celeb(gender="female"):
+    # Choose keywords based on gender
+    keywords = {
+        "female": ["female model", "female pornstar", "female influencer"],
+        "male": ["male model", "male pornstar", "male influencer"]
+    }
+
+    search_term = random.choice(keywords[gender])
+
+    # Search Wikipedia
+    async with aiohttp.ClientSession() as session:
+        api_url = f"https://en.wikipedia.org/w/api.php"
+        params = {
+            "action": "query",
+            "format": "json",
+            "list": "search",
+            "srsearch": search_term,
+            "srlimit": 20
+        }
+        async with session.get(api_url, params=params) as resp:
+            data = await resp.json()
+
+        pages = data.get("query", {}).get("search", [])
+        if not pages:
+            return None
+
+        # Pick a random page
+        page_title = random.choice(pages)["title"]
+
+        # Get thumbnail
+        params = {
+            "action": "query",
+            "format": "json",
+            "prop": "pageimages",
+            "titles": page_title,
+            "pithumbsize": 500
+        }
+        async with session.get(api_url, params=params) as resp:
+            image_data = await resp.json()
+
+        pages = image_data.get("query", {}).get("pages", {})
+        for page in pages.values():
+            thumb = page.get("thumbnail", {}).get("source")
+            if thumb:
+                return {
+                    "name": page_title,
+                    "image": thumb
+                }
+
+        return None  # fallback if no image
+
 # --- Placeholder until other APIs are added ---
 async def get_random_celeb(gender="female"):
-    source = random.choice(["tmdb", "spotify"])
+    source = random.choice(["tmdb", "spotify", "wikipedia"])
 
     if source == "tmdb":
         return await get_tmdb_celeb(gender)
-    else:
+    elif source == "spotify":
         celeb = await get_spotify_artist(gender)
         if celeb:
             return celeb
-        return await get_tmdb_celeb(gender)  # fallback
+    elif source == "wikipedia":
+        celeb = await get_wiki_celeb(gender)
+        if celeb:
+            return celeb
+
+    # fallback
+    return await get_tmdb_celeb(gender)
 
 # --- Slash Command ---
 @bot.tree.command(name="smash", description="Vote who you would smash")
