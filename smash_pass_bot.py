@@ -326,5 +326,7 @@ async def top(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
-    print(f"{bot.user} is ready and slash commands are synced.")
+    for guild in bot.guilds:
+        await bot.tree.sync(guild=guild)
+        print(f"✅ Synced commands to guild: {guild.name} ({guild.id})")
+    print(f"{bot.user} is ready.")
