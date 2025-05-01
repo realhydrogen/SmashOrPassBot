@@ -6,6 +6,9 @@ import asyncio
 import os
 from discord.ext import commands
 from dotenv import load_dotenv
+import aiohttp
+from PIL import Image
+from io import BytesIO
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -38,13 +41,33 @@ async def smash(ctx, gender="female"):
     celeb1 = await get_random_celeb(gender)
     celeb2 = await get_random_celeb(gender)
 
+    # Download both images
+    async with aiohttp.ClientSession() as session:
+        async with session.get(celeb1["image"]) as r1:
+            img1_bytes = await r1.read()
+        async with session.get(celeb2["image"]) as r2:
+            img2_bytes = await r2.read()
+
+    img1 = Image.open(BytesIO(img1_bytes)).resize((300, 450))
+    img2 = Image.open(BytesIO(img2_bytes)).resize((300, 450))
+
+    # Combine side by side
+    combined = Image.new("RGB", (600, 450))
+    combined.paste(img1, (0, 0))
+    combined.paste(img2, (300, 0))
+
+    buffer = BytesIO()
+    combined.save(buffer, format="PNG")
+    buffer.seek(0)
+    file = discord.File(fp=buffer, filename="combo.png")
+
     embed = discord.Embed(title="Who would you smash? React below!")
-    embed.add_field(name="🅰️ " + celeb1["name"], value="Smash", inline=True)
-    embed.add_field(name="🅱️ " + celeb2["name"], value="Smash", inline=True)
-    embed.set_image(url=celeb1["image"])  # Only one image can be previewed at once in an embed
+    embed.add_field(name="🅰️ " + celeb1["name"], value="Left", inline=True)
+    embed.add_field(name="🅱️ " + celeb2["name"], value="Right", inline=True)
+    embed.set_image(url="attachment://combo.png")
     embed.set_footer(text="🅰️ = Left | 🅱️ = Right | 10 seconds to vote")
 
-    msg = await ctx.send(embed=embed)
+    msg = await ctx.send(embed=embed, file=file)
 
     await msg.add_reaction("🅰️")
     await msg.add_reaction("🅱️")
@@ -63,11 +86,10 @@ async def smash(ctx, gender="female"):
     else:
         winner = "It's a tie!"
 
-    result = f"""
+    await ctx.send(f"""
 🅰️ {celeb1['name']}: {a_votes} votes  
 🅱️ {celeb2['name']}: {b_votes} votes  
 🏆 **Winner: {winner}**
-"""
-    await ctx.send(result)
+""")
 
 bot.run(TOKEN)
