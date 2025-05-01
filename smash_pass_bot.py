@@ -20,7 +20,10 @@ from datetime import datetime
 smash_lock = asyncio.Lock()
 last_winner = None
 
-wiki = wikipediaapi.Wikipedia('en')
+wiki = wikipediaapi.Wikipedia(
+    language='en',
+    user_agent='SmashPassBot/1.0 (https://github.com/yourusername/SmashOrPassBot)'
+)
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
