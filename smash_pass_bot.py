@@ -330,3 +330,5 @@ async def on_ready():
         await bot.tree.sync(guild=guild)
         print(f"✅ Synced commands to guild: {guild.name} ({guild.id})")
     print(f"{bot.user} is ready.")
+    
+bot.run(TOKEN)
