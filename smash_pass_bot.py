@@ -285,6 +285,39 @@ async def smashing(interaction: discord.Interaction):
 🅱️ {new_celeb['name']}: {b_votes} votes  
 🏆 **Winner: {winner}**
 """)
+    
+@bot.tree.command(name="top", description="Show the top 5 most smashed celebrities")
+async def top(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    if not os.path.exists("match_log.json"):
+        await interaction.followup.send("No match history found.", ephemeral=True)
+        return
+
+    from collections import Counter
+
+    smash_counts = Counter()
+
+    with open("match_log.json", "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                if entry.get("winner") and entry.get("winner") != "tie":
+                    smash_counts[entry["winner"]] += 1
+            except json.JSONDecodeError:
+                continue
+
+    if not smash_counts:
+        await interaction.followup.send("No smash data to rank yet.", ephemeral=True)
+        return
+
+    top_celebrities = smash_counts.most_common(5)
+    embed = discord.Embed(title="🏆 Top 5 Most Smashed Celebrities")
+
+    for i, (name, count) in enumerate(top_celebrities, start=1):
+        embed.add_field(name=f"#{i} {name}", value=f"{count} smashes", inline=False)
+
+    await interaction.followup.send(embed=embed)
 
 @bot.event
 async def on_ready():
