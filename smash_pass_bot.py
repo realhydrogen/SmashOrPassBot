@@ -26,6 +26,8 @@ wiki = wikipediaapi.Wikipedia(
 )
 
 load_dotenv()
+print("SmashPassBot starting up...")
+print("DISCORD_TOKEN:", os.getenv("DISCORD_TOKEN"))
 TOKEN = os.getenv("DISCORD_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
