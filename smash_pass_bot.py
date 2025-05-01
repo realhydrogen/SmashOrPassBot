@@ -12,18 +12,24 @@ from PIL import Image, ImageDraw, ImageFont
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import wikipediaapi
+from typing import Literal
+import json
+from datetime import datetime
+
+# Global lock and winner memory
+smash_lock = asyncio.Lock()
+last_winner = None
 
 wiki = wikipediaapi.Wikipedia('en')
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
 spotify = spotipy.Spotify(
     auth_manager=SpotifyClientCredentials(
@@ -37,21 +43,17 @@ async def get_spotify_artist(gender="female"):
         "female": ["pop", "r&b", "k-pop", "latin", "female vocalists"],
         "male": ["rap", "rock", "hip hop", "male vocalists"]
     }
-
     genre = random.choice(genre_pool[gender])
     results = spotify.search(q=f'genre:"{genre}"', type="artist", limit=20)
     artists = [a for a in results["artists"]["items"] if a.get("images")]
-
     if not artists:
         return None
-
     artist = random.choice(artists)
     return {
         "name": artist["name"],
         "image": artist["images"][0]["url"]
     }
 
-# --- TMDb Support ---
 async def get_tmdb_celeb(gender="female"):
     gender_code = 1 if gender == "female" else 2
     async with aiohttp.ClientSession() as session:
@@ -66,139 +68,221 @@ async def get_tmdb_celeb(gender="female"):
                 "image": f"https://image.tmdb.org/t/p/w500{celeb['profile_path']}"
             }
 
-async def get_wiki_celeb(gender="female"):
-    # Choose keywords based on gender
-    keywords = {
-        "female": ["female model", "female pornstar", "female influencer"],
-        "male": ["male model", "male pornstar", "male influencer"]
+async def get_wiki_celeb(gender="female", category="model"):
+    search_terms = {
+        "model": f"{gender} fashion model",
+        "pornstar": f"{gender} pornographic actor",
+        "influencer": f"{gender} social media influencer"
     }
+    search_query = search_terms.get(category, f"{gender} celebrity")
 
-    search_term = random.choice(keywords[gender])
-
-    # Search Wikipedia
     async with aiohttp.ClientSession() as session:
-        api_url = f"https://en.wikipedia.org/w/api.php"
-        params = {
+        search_url = "https://en.wikipedia.org/w/api.php"
+        search_params = {
             "action": "query",
             "format": "json",
             "list": "search",
-            "srsearch": search_term,
+            "srsearch": search_query,
             "srlimit": 20
         }
-        async with session.get(api_url, params=params) as resp:
+        async with session.get(search_url, params=search_params) as resp:
             data = await resp.json()
-
         pages = data.get("query", {}).get("search", [])
         if not pages:
             return None
-
-        # Pick a random page
         page_title = random.choice(pages)["title"]
 
-        # Get thumbnail
-        params = {
+        image_params = {
             "action": "query",
             "format": "json",
             "prop": "pageimages",
             "titles": page_title,
             "pithumbsize": 500
         }
-        async with session.get(api_url, params=params) as resp:
+        async with session.get(search_url, params=image_params) as resp:
             image_data = await resp.json()
-
-        pages = image_data.get("query", {}).get("pages", {})
-        for page in pages.values():
+        image_pages = image_data.get("query", {}).get("pages", {})
+        for page in image_pages.values():
             thumb = page.get("thumbnail", {}).get("source")
             if thumb:
-                return {
-                    "name": page_title,
-                    "image": thumb
-                }
+                return {"name": page_title, "image": thumb}
+    return None
 
-        return None  # fallback if no image
-
-# --- Placeholder until other APIs are added ---
-async def get_random_celeb(gender="female"):
-    source = random.choice(["tmdb", "spotify", "wikipedia"])
-
-    if source == "tmdb":
+async def get_random_celeb(gender="female", category="actor"):
+    if category == "actor":
         return await get_tmdb_celeb(gender)
-    elif source == "spotify":
+    elif category == "singer":
         celeb = await get_spotify_artist(gender)
         if celeb:
             return celeb
-    elif source == "wikipedia":
-        celeb = await get_wiki_celeb(gender)
+    elif category in ["model", "influencer", "pornstar"]:
+        celeb = await get_wiki_celeb(gender, category)
         if celeb:
             return celeb
-
-    # fallback
     return await get_tmdb_celeb(gender)
 
-# --- Slash Command ---
-@bot.tree.command(name="smash", description="Vote who you would smash")
-@app_commands.describe(gender="Choose male or female")
-async def smash(interaction: discord.Interaction, gender: str = "female"):
+def log_match(winner, loser, a_votes, b_votes, gender, category):
+    log_data = {
+        "winner": winner,
+        "loser": loser,
+        "votes": {"🅰️": a_votes, "🅱️": b_votes},
+        "gender": gender,
+        "category": category,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    with open("match_log.json", "a") as f:
+        f.write(json.dumps(log_data) + "\n")
+
+@bot.tree.command(name="smash", description="Vote on who you would smash")
+@app_commands.describe(
+    gender="Choose male or female",
+    category="Choose a type of celebrity",
+    duration="How many seconds to vote (5-60)"
+)
+async def smash(interaction: discord.Interaction,
+    gender: Literal["male", "female"] = "female",
+    category: Literal["actor", "singer", "model", "pornstar", "influencer"] = "actor",
+    duration: int = 10):
     await interaction.response.defer()
+    if duration < 5 or duration > 60:
+        await interaction.followup.send("⏱ Duration must be between 5 and 60 seconds.", ephemeral=True)
+        return
+    if smash_lock.locked():
+        await interaction.followup.send("⚠️ A Smash or Pass match is already running. Please wait!", ephemeral=True)
+        return
+    async with smash_lock:
+        celeb1 = await get_random_celeb(gender, category)
+        celeb2 = await get_random_celeb(gender, category)
+        if not celeb1 or not celeb2:
+            await interaction.followup.send("❌ Couldn't fetch enough celebrity data. Try again!", ephemeral=True)
+            return
+        IMG_WIDTH = 300
+        IMG_HEIGHT = 450
+        GAP = 20
+        CANVAS_WIDTH = IMG_WIDTH * 2 + GAP
+        async with aiohttp.ClientSession() as session:
+            async with session.get(celeb1["image"]) as r1:
+                img1_bytes = await r1.read()
+            async with session.get(celeb2["image"]) as r2:
+                img2_bytes = await r2.read()
+        img1 = Image.open(BytesIO(img1_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
+        img2 = Image.open(BytesIO(img2_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
+        combined = Image.new("RGB", (CANVAS_WIDTH, IMG_HEIGHT), color=(0, 0, 0))
+        combined.paste(img1, (0, 0))
+        combined.paste(img2, (IMG_WIDTH + GAP, 0))
+        draw = ImageDraw.Draw(combined)
+        font = ImageFont.load_default()
+        text = "VS"
+        bbox = font.getbbox(text)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        draw.text(((CANVAS_WIDTH // 2) - (text_width // 2), (IMG_HEIGHT // 2) - (text_height // 2)),
+                  text, fill=(255, 255, 255), font=font)
+        buffer = BytesIO()
+        combined.save(buffer, format="PNG")
+        buffer.seek(0)
+        file = discord.File(fp=buffer, filename="versus.png")
+        embed = discord.Embed(title="Who would you smash?")
+        embed.add_field(name="🅰️ " + celeb1["name"], value="Left", inline=True)
+        embed.add_field(name="🅱️ " + celeb2["name"], value="Right", inline=True)
+        embed.set_image(url="attachment://versus.png")
+        embed.set_footer(text=f"Vote with 🅰️ or 🅱️ - {duration} seconds!")
+        msg = await interaction.followup.send(embed=embed, file=file)
+        await msg.add_reaction("🅰️")
+        await msg.add_reaction("🅱️")
+        await asyncio.sleep(duration)
+        msg = await interaction.channel.fetch_message(msg.id)
+        reactions = {r.emoji: r.count - 1 for r in msg.reactions}
+        a_votes = reactions.get("🅰️", 0)
+        b_votes = reactions.get("🅱️", 0)
+        if a_votes > b_votes:
+            winner = celeb1["name"]
+        elif b_votes > a_votes:
+            winner = celeb2["name"]
+        else:
+            winner = "It's a tie!"
+        log_match(
+            winner=winner if winner != "It's a tie!" else "tie",
+            loser=celeb2["name"] if winner == celeb1["name"] else celeb1["name"],
+            a_votes=a_votes,
+            b_votes=b_votes,
+            gender=gender,
+            category=category
+        )
+        global last_winner
+        if winner != "It's a tie!":
+            last_winner = {
+                "name": celeb1["name"] if winner == celeb1["name"] else celeb2["name"],
+                "image": celeb1["image"] if winner == celeb1["name"] else celeb2["image"],
+                "gender": gender,
+                "category": category
+            }
+        await interaction.followup.send(f"""
+🅰️ {celeb1['name']}: {a_votes} votes  
+🅱️ {celeb2['name']}: {b_votes} votes  
+🏆 **Winner: {winner}**
+""")
 
-    celeb1 = await get_random_celeb(gender)
-    celeb2 = await get_random_celeb(gender)
-
-    # Download images
+@bot.tree.command(name="smashing", description="Pit the previous winner against a new contender")
+async def smashing(interaction: discord.Interaction):
+    await interaction.response.defer()
+    global last_winner
+    if not last_winner:
+        await interaction.followup.send("⚠️ No previous winner found. Run `/smash` first!", ephemeral=True)
+        return
+    new_celeb = await get_random_celeb(last_winner["gender"], last_winner["category"])
+    if not new_celeb:
+        await interaction.followup.send("❌ Couldn't fetch a new contender. Try again!", ephemeral=True)
+        return
+    IMG_WIDTH = 300
+    IMG_HEIGHT = 450
+    GAP = 20
+    CANVAS_WIDTH = IMG_WIDTH * 2 + GAP
     async with aiohttp.ClientSession() as session:
-        async with session.get(celeb1["image"]) as r1:
+        async with session.get(last_winner["image"]) as r1:
             img1_bytes = await r1.read()
-        async with session.get(celeb2["image"]) as r2:
+        async with session.get(new_celeb["image"]) as r2:
             img2_bytes = await r2.read()
-
-    # Combine images with "VS"
-    img1 = Image.open(BytesIO(img1_bytes)).resize((300, 450))
-    img2 = Image.open(BytesIO(img2_bytes)).resize((300, 450))
-    combined = Image.new("RGB", (620, 450), color=(0, 0, 0))
+    img1 = Image.open(BytesIO(img1_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
+    img2 = Image.open(BytesIO(img2_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
+    combined = Image.new("RGB", (CANVAS_WIDTH, IMG_HEIGHT), color=(0, 0, 0))
     combined.paste(img1, (0, 0))
-    combined.paste(img2, (320, 0))
-
+    combined.paste(img2, (IMG_WIDTH + GAP, 0))
     draw = ImageDraw.Draw(combined)
     font = ImageFont.load_default()
     text = "VS"
     bbox = font.getbbox(text)
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
-    draw.text(((310 - text_width // 2), (225 - text_height // 2)), text, fill=(255, 255, 255), font=font)
-
-    # Send image
+    draw.text(((CANVAS_WIDTH // 2) - (text_width // 2), (IMG_HEIGHT // 2) - (text_height // 2)),
+              text, fill=(255, 255, 255), font=font)
     buffer = BytesIO()
     combined.save(buffer, format="PNG")
     buffer.seek(0)
     file = discord.File(fp=buffer, filename="versus.png")
-
-    embed = discord.Embed(title="Who would you smash?")
-    embed.add_field(name="🅰️ " + celeb1["name"], value="Left", inline=True)
-    embed.add_field(name="🅱️ " + celeb2["name"], value="Right", inline=True)
+    embed = discord.Embed(title=f"{last_winner['name']} defends the title!")
+    embed.add_field(name="🅰️ " + last_winner["name"], value="Champion", inline=True)
+    embed.add_field(name="🅱️ " + new_celeb["name"], value="Challenger", inline=True)
     embed.set_image(url="attachment://versus.png")
     embed.set_footer(text="Vote with 🅰️ or 🅱️ - 10 seconds!")
-
     msg = await interaction.followup.send(embed=embed, file=file)
     await msg.add_reaction("🅰️")
     await msg.add_reaction("🅱️")
-
     await asyncio.sleep(10)
-
     msg = await interaction.channel.fetch_message(msg.id)
     reactions = {r.emoji: r.count - 1 for r in msg.reactions}
     a_votes = reactions.get("🅰️", 0)
     b_votes = reactions.get("🅱️", 0)
-
     if a_votes > b_votes:
-        winner = celeb1["name"]
+        winner = last_winner["name"]
     elif b_votes > a_votes:
-        winner = celeb2["name"]
+        winner = new_celeb["name"]
+        last_winner = new_celeb
     else:
         winner = "It's a tie!"
-
     await interaction.followup.send(f"""
-🅰️ {celeb1['name']}: {a_votes} votes  
-🅱️ {celeb2['name']}: {b_votes} votes  
+🅰️ {last_winner['name']}: {a_votes} votes  
+🅱️ {new_celeb['name']}: {b_votes} votes  
 🏆 **Winner: {winner}**
 """)
 
