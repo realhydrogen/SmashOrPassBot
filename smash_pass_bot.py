@@ -22,7 +22,7 @@ last_winner = None
 
 wiki = wikipediaapi.Wikipedia(
     language='en',
-    user_agent='SmashPassBot/1.0 (https://github.com/yourusername/SmashOrPassBot)'
+    user_agent='SmashPassBot/1.0 (https://example.com/contact)'
 )
 
 load_dotenv()
