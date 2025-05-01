@@ -6,9 +6,9 @@ import asyncio
 import os
 from discord.ext import commands
 from dotenv import load_dotenv
-import aiohttp
-from PIL import Image
 from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -41,43 +41,56 @@ async def smash(ctx, gender="female"):
     celeb1 = await get_random_celeb(gender)
     celeb2 = await get_random_celeb(gender)
 
-    # Download both images
+    # Download images
     async with aiohttp.ClientSession() as session:
         async with session.get(celeb1["image"]) as r1:
             img1_bytes = await r1.read()
         async with session.get(celeb2["image"]) as r2:
             img2_bytes = await r2.read()
 
+    # Open and resize
     img1 = Image.open(BytesIO(img1_bytes)).resize((300, 450))
     img2 = Image.open(BytesIO(img2_bytes)).resize((300, 450))
 
-    # Combine side by side
-    combined = Image.new("RGB", (600, 450))
+    # Create new image with space in middle
+    combined = Image.new("RGB", (620, 450), color=(0, 0, 0))
     combined.paste(img1, (0, 0))
-    combined.paste(img2, (300, 0))
+    combined.paste(img2, (320, 0))
 
+    # Add "VS" in the middle
+    draw = ImageDraw.Draw(combined)
+    try:
+        font = ImageFont.truetype("arial.ttf", 40)
+    except:
+        font = ImageFont.load_default()
+    text = "VS"
+    text_width, text_height = draw.textsize(text, font=font)
+    draw.text(((310 - text_width // 2), (225 - text_height // 2)), text, fill=(255, 255, 255), font=font)
+
+    # Save to memory
     buffer = BytesIO()
     combined.save(buffer, format="PNG")
     buffer.seek(0)
-    file = discord.File(fp=buffer, filename="combo.png")
+    file = discord.File(fp=buffer, filename="versus.png")
 
-    embed = discord.Embed(title="Who would you smash? React below!")
+    # Create and send embed
+    embed = discord.Embed(title="Who would you smash?")
     embed.add_field(name="🅰️ " + celeb1["name"], value="Left", inline=True)
     embed.add_field(name="🅱️ " + celeb2["name"], value="Right", inline=True)
-    embed.set_image(url="attachment://combo.png")
-    embed.set_footer(text="🅰️ = Left | 🅱️ = Right | 10 seconds to vote")
+    embed.set_image(url="attachment://versus.png")
+    embed.set_footer(text="Vote with 🅰️ or 🅱️ - 10 seconds!")
 
     msg = await ctx.send(embed=embed, file=file)
-
     await msg.add_reaction("🅰️")
     await msg.add_reaction("🅱️")
 
     await asyncio.sleep(10)
-    msg = await ctx.channel.fetch_message(msg.id)
 
-    votes = {r.emoji: r.count - 1 for r in msg.reactions}
-    a_votes = votes.get("🅰️", 0)
-    b_votes = votes.get("🅱️", 0)
+    # Tally votes
+    msg = await ctx.channel.fetch_message(msg.id)
+    reactions = {r.emoji: r.count - 1 for r in msg.reactions}
+    a_votes = reactions.get("🅰️", 0)
+    b_votes = reactions.get("🅱️", 0)
 
     if a_votes > b_votes:
         winner = celeb1["name"]
