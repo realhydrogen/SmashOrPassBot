@@ -38,31 +38,36 @@ async def smash(ctx, gender="female"):
     celeb1 = await get_random_celeb(gender)
     celeb2 = await get_random_celeb(gender)
 
-    embed1 = discord.Embed(title=celeb1["name"])
-    embed1.set_image(url=celeb1["image"])
-    embed2 = discord.Embed(title=celeb2["name"])
-    embed2.set_image(url=celeb2["image"])
+    embed = discord.Embed(title="Who would you smash? React below!")
+    embed.add_field(name="🅰️ " + celeb1["name"], value="Smash", inline=True)
+    embed.add_field(name="🅱️ " + celeb2["name"], value="Smash", inline=True)
+    embed.set_image(url=celeb1["image"])  # Only one image can be previewed at once in an embed
+    embed.set_footer(text="🅰️ = Left | 🅱️ = Right | 10 seconds to vote")
 
-    msg1 = await ctx.send("Smash or Pass? 🔥/❌", embed=embed1)
-    msg2 = await ctx.send("Smash or Pass? 🔥/❌", embed=embed2)
+    msg = await ctx.send(embed=embed)
 
-    for emoji in ["🔥", "❌"]:
-        await msg1.add_reaction(emoji)
-        await msg2.add_reaction(emoji)
+    await msg.add_reaction("🅰️")
+    await msg.add_reaction("🅱️")
 
     await asyncio.sleep(10)
+    msg = await ctx.channel.fetch_message(msg.id)
 
-    msg1 = await ctx.channel.fetch_message(msg1.id)
-    msg2 = await ctx.channel.fetch_message(msg2.id)
+    votes = {r.emoji: r.count - 1 for r in msg.reactions}
+    a_votes = votes.get("🅰️", 0)
+    b_votes = votes.get("🅱️", 0)
 
-    def count_votes(msg):
-        votes = {r.emoji: r.count - 1 for r in msg.reactions}
-        return votes.get("🔥", 0)
+    if a_votes > b_votes:
+        winner = celeb1["name"]
+    elif b_votes > a_votes:
+        winner = celeb2["name"]
+    else:
+        winner = "It's a tie!"
 
-    score1 = count_votes(msg1)
-    score2 = count_votes(msg2)
-
-    winner = celeb1["name"] if score1 > score2 else celeb2["name"]
-    await ctx.send(f"🔥 {celeb1['name']}: {score1} votes\n🔥 {celeb2['name']}: {score2} votes\n🏆 Winner: **{winner}**")
+    result = f"""
+🅰️ {celeb1['name']}: {a_votes} votes  
+🅱️ {celeb2['name']}: {b_votes} votes  
+🏆 **Winner: {winner}**
+"""
+    await ctx.send(result)
 
 bot.run(TOKEN)
