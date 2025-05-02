@@ -226,33 +226,47 @@ async def smash(
     gender: Literal["male", "female"] = "female",
     duration: int = 10
 ):
-    await interaction.response.defer()
+    await interaction.response.send_message("🔄 Loading matchup...", ephemeral=True)
+
     if duration < 5 or duration > 60:
-        await interaction.followup.send("⏱ Duration must be between 5 and 60 seconds.", ephemeral=True)
+        await interaction.edit_original_response(content="⏱ Duration must be between 5 and 60 seconds.")
         return
+
     if smash_lock.locked():
-        await interaction.followup.send("⚠️ A Smash or Pass match is already running. Please wait!", ephemeral=True)
+        await interaction.edit_original_response(content="⚠️ A match is already running. Please wait.")
         return
+
     async with smash_lock:
         celeb1 = await get_random_celeb(gender)
         celeb2 = await get_random_celeb(gender)
+
+        # Retry if same name (max 3 tries)
+        attempts = 0
+        while celeb2 and celeb2["name"] == celeb1["name"] and attempts < 3:
+        celeb2 = await get_random_celeb(gender)
+        attempts += 1
+
         if not celeb1 or not celeb2:
-            await interaction.followup.send("❌ Couldn't fetch enough celebrity data. Try again!", ephemeral=True)
+            await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
             return
+
         IMG_WIDTH = 300
         IMG_HEIGHT = 450
         GAP = 20
         CANVAS_WIDTH = IMG_WIDTH * 2 + GAP
+
         async with aiohttp.ClientSession() as session:
             async with session.get(celeb1["image"]) as r1:
                 img1_bytes = await r1.read()
             async with session.get(celeb2["image"]) as r2:
                 img2_bytes = await r2.read()
+
         img1 = Image.open(BytesIO(img1_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
         img2 = Image.open(BytesIO(img2_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
         combined = Image.new("RGB", (CANVAS_WIDTH, IMG_HEIGHT), color=(0, 0, 0))
         combined.paste(img1, (0, 0))
         combined.paste(img2, (IMG_WIDTH + GAP, 0))
+
         draw = ImageDraw.Draw(combined)
         font = ImageFont.load_default()
         text = "VS"
@@ -261,29 +275,35 @@ async def smash(
         text_height = bbox[3] - bbox[1]
         draw.text(((CANVAS_WIDTH // 2) - (text_width // 2), (IMG_HEIGHT // 2) - (text_height // 2)),
                   text, fill=(255, 255, 255), font=font)
+
         buffer = BytesIO()
         combined.save(buffer, format="PNG")
         buffer.seek(0)
         file = discord.File(fp=buffer, filename="versus.png")
+
         embed = discord.Embed(title="Who would you smash?")
         embed.add_field(name="🅰️ " + celeb1["name"], value="Left", inline=True)
         embed.add_field(name="🅱️ " + celeb2["name"], value="Right", inline=True)
         embed.set_image(url="attachment://versus.png")
         embed.set_footer(text=f"Vote with 🅰️ or 🅱️ - {duration} seconds!")
-        msg = await interaction.followup.send(embed=embed, file=file)
-        await msg.add_reaction("🅰️")
-        await msg.add_reaction("🅱️")
+
+        message = await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
+        await message.add_reaction("🅰️")
+        await message.add_reaction("🅱️")
         await asyncio.sleep(duration)
-        msg = await interaction.channel.fetch_message(msg.id)
-        reactions = {r.emoji: r.count - 1 for r in msg.reactions}
+
+        updated_message = await interaction.channel.fetch_message(message.id)
+        reactions = {r.emoji: r.count - 1 for r in updated_message.reactions}
         a_votes = reactions.get("🅰️", 0)
         b_votes = reactions.get("🅱️", 0)
+
         if a_votes > b_votes:
             winner = celeb1["name"]
         elif b_votes > a_votes:
             winner = celeb2["name"]
         else:
             winner = "It's a tie!"
+
         log_match(
             winner=winner if winner != "It's a tie!" else "tie",
             loser=celeb2["name"] if winner == celeb1["name"] else celeb1["name"],
@@ -291,6 +311,7 @@ async def smash(
             b_votes=b_votes,
             gender=gender,
         )
+
         global last_winner
         if winner != "It's a tie!":
             last_winner = {
@@ -298,37 +319,45 @@ async def smash(
                 "image": celeb1["image"] if winner == celeb1["name"] else celeb2["image"],
                 "gender": gender,
             }
-        await interaction.followup.send(f"""
+
+        result_text = f"""
 🅰️ {celeb1['name']}: {a_votes} votes  
 🅱️ {celeb2['name']}: {b_votes} votes  
 🏆 **Winner: {winner}**
-""")
+"""
+        await interaction.followup.send(result_text)
 
 @bot.tree.command(name="smashing", description="Pit the previous winner against a new contender")
 async def smashing(interaction: discord.Interaction):
-    await interaction.response.defer()
+    await interaction.response.send_message("🔄 Loading next matchup...", ephemeral=True)
+
     global last_winner
     if not last_winner:
-        await interaction.followup.send("⚠️ No previous winner found. Run `/smash` first!", ephemeral=True)
+        await interaction.edit_original_response(content="⚠️ No previous winner found. Run `/smash` first!")
         return
+
     new_celeb = await get_random_celeb(last_winner["gender"])
     if not new_celeb:
-        await interaction.followup.send("❌ Couldn't fetch a new contender. Try again!", ephemeral=True)
+        await interaction.edit_original_response(content="❌ Couldn't fetch a new contender. Try again!")
         return
+
     IMG_WIDTH = 300
     IMG_HEIGHT = 450
     GAP = 20
     CANVAS_WIDTH = IMG_WIDTH * 2 + GAP
+
     async with aiohttp.ClientSession() as session:
         async with session.get(last_winner["image"]) as r1:
             img1_bytes = await r1.read()
         async with session.get(new_celeb["image"]) as r2:
             img2_bytes = await r2.read()
+
     img1 = Image.open(BytesIO(img1_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
     img2 = Image.open(BytesIO(img2_bytes)).resize((IMG_WIDTH, IMG_HEIGHT))
     combined = Image.new("RGB", (CANVAS_WIDTH, IMG_HEIGHT), color=(0, 0, 0))
     combined.paste(img1, (0, 0))
     combined.paste(img2, (IMG_WIDTH + GAP, 0))
+
     draw = ImageDraw.Draw(combined)
     font = ImageFont.load_default()
     text = "VS"
@@ -337,23 +366,28 @@ async def smashing(interaction: discord.Interaction):
     text_height = bbox[3] - bbox[1]
     draw.text(((CANVAS_WIDTH // 2) - (text_width // 2), (IMG_HEIGHT // 2) - (text_height // 2)),
               text, fill=(255, 255, 255), font=font)
+
     buffer = BytesIO()
     combined.save(buffer, format="PNG")
     buffer.seek(0)
     file = discord.File(fp=buffer, filename="versus.png")
+
     embed = discord.Embed(title=f"{last_winner['name']} defends the title!")
     embed.add_field(name="🅰️ " + last_winner["name"], value="Champion", inline=True)
     embed.add_field(name="🅱️ " + new_celeb["name"], value="Challenger", inline=True)
     embed.set_image(url="attachment://versus.png")
     embed.set_footer(text="Vote with 🅰️ or 🅱️ - 10 seconds!")
-    msg = await interaction.followup.send(embed=embed, file=file)
-    await msg.add_reaction("🅰️")
-    await msg.add_reaction("🅱️")
+
+    message = await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
+    await message.add_reaction("🅰️")
+    await message.add_reaction("🅱️")
     await asyncio.sleep(10)
-    msg = await interaction.channel.fetch_message(msg.id)
-    reactions = {r.emoji: r.count - 1 for r in msg.reactions}
+
+    updated_message = await interaction.channel.fetch_message(message.id)
+    reactions = {r.emoji: r.count - 1 for r in updated_message.reactions}
     a_votes = reactions.get("🅰️", 0)
     b_votes = reactions.get("🅱️", 0)
+
     if a_votes > b_votes:
         winner = last_winner["name"]
     elif b_votes > a_votes:
@@ -361,6 +395,7 @@ async def smashing(interaction: discord.Interaction):
         last_winner = new_celeb
     else:
         winner = "It's a tie!"
+
     await interaction.followup.send(f"""
 🅰️ {last_winner['name']}: {a_votes} votes  
 🅱️ {new_celeb['name']}: {b_votes} votes  
@@ -369,10 +404,10 @@ async def smashing(interaction: discord.Interaction):
     
 @bot.tree.command(name="top", description="Show the top 5 most smashed celebrities")
 async def top(interaction: discord.Interaction):
-    await interaction.response.defer()
+    await interaction.response.send_message("📊 Gathering top results...", ephemeral=True)
 
     if not os.path.exists("match_log.json"):
-        await interaction.followup.send("No match history found.", ephemeral=True)
+        await interaction.edit_original_response(content="❌ No match history found.")
         return
 
     from collections import Counter
@@ -383,13 +418,13 @@ async def top(interaction: discord.Interaction):
         for line in f:
             try:
                 entry = json.loads(line)
-                if entry.get("winner") and entry.get("winner") != "tie":
+                if entry.get("winner") and entry["winner"] != "tie":
                     smash_counts[entry["winner"]] += 1
             except json.JSONDecodeError:
                 continue
 
     if not smash_counts:
-        await interaction.followup.send("No smash data to rank yet.", ephemeral=True)
+        await interaction.edit_original_response(content="⚠️ No smash data to rank yet.")
         return
 
     top_celebrities = smash_counts.most_common(5)
@@ -397,8 +432,11 @@ async def top(interaction: discord.Interaction):
 
     for i, (name, count) in enumerate(top_celebrities, start=1):
         embed.add_field(name=f"#{i} {name}", value=f"{count} smashes", inline=False)
+        image_url = f"https://ui-avatars.com/api/?name={top_celebrities[0][0].replace(' ', '+')}&background=random"
+        embed.set_thumbnail(url=image_url)
 
-    await interaction.followup.send(embed=embed)
+    await interaction.edit_original_response(content=None, embed=embed)
+
 
 @bot.event
 async def on_ready():
