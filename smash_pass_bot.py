@@ -244,14 +244,13 @@ if not celeb1 or not celeb2:
     await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
     return
 
-    # Retry if same name (max 3 tries)
-    attempts = 0
-    while celeb1["name"] == celeb2["name"] and attempts < 3:
+# Retry if same name (max 3 tries)
+attempts = 0
+while celeb1["name"] == celeb2["name"]:
     celeb2 = await get_random_celeb(gender)
-    if not celeb2:
-        await interaction.edit_original_response(content="❌ Failed to fetch unique celebrities.")
-        return
     attempts += 1
+    if attempts >= 3:
+        break
 
     if not celeb1 or not celeb2:
         await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
