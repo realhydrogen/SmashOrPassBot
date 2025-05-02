@@ -185,17 +185,19 @@ async def get_wiki_image_for_name(name: str):
 
     return None
 
-async def get_random_celeb(gender="female"):
+def get_random_celeb(gender="female"):
     url = 'https://api.api-ninjas.com/v1/celebrity'
     headers = {'X-Api-Key': os.getenv("API_NINJAS_KEY")}
     params = {"gender": gender}
 
     response = requests.get(url, headers=headers, params=params)
+    print(f"API Status: {response.status_code}")
+    print(f"API Response: {response.text}")  # <- Add this line
+
     if response.status_code == 200:
         data = response.json()
         if data:
             celeb = random.choice(data)
-            # Fallback image placeholder (no images in API, use your own logic if needed)
             image_url = f"https://ui-avatars.com/api/?name={celeb['name'].replace(' ', '+')}&background=random"
             return {
                 "name": celeb["name"],
