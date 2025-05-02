@@ -239,21 +239,21 @@ async def smash(
         celeb1 = await get_random_celeb(gender)
         celeb2 = await get_random_celeb(gender)
 
-if not celeb1 or not celeb2:
-    await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
-    return
-
-# Retry if same name (max 3 tries)
-attempts = 0
-while celeb1["name"] == celeb2["name"]:
-    celeb2 = await get_random_celeb(gender)
-    attempts += 1
-    if attempts >= 3:
-        break
-
     if not celeb1 or not celeb2:
         await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
         return
+
+    # Retry if same name (max 3 tries)
+    attempts = 0
+    while celeb1["name"] == celeb2["name"]:
+        celeb2 = await get_random_celeb(gender)
+        attempts += 1
+        if attempts >= 3:
+            break
+
+        if not celeb1 or not celeb2:
+            await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
+            return
 
         IMG_WIDTH = 300
         IMG_HEIGHT = 450
@@ -279,7 +279,7 @@ while celeb1["name"] == celeb2["name"]:
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
         draw.text(((CANVAS_WIDTH // 2) - (text_width // 2), (IMG_HEIGHT // 2) - (text_height // 2)),
-                  text, fill=(255, 255, 255), font=font)
+                text, fill=(255, 255, 255), font=font)
 
         buffer = BytesIO()
         combined.save(buffer, format="PNG")
