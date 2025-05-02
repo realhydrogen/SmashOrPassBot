@@ -242,8 +242,8 @@ async def smash(
 
         # Retry if same name (max 3 tries)
         attempts = 0
-        while celeb2 and celeb2["name"] == celeb1["name"] and attempts < 3:
-        celeb2 = await get_random_celeb(gender)
+        while some_condition:
+            celeb2 = await get_random_celeb(gender)
         attempts += 1
 
         if not celeb1 or not celeb2:
