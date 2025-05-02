@@ -20,7 +20,6 @@ import requests
 
 # Global lock and winner memory
 smash_lock = asyncio.Lock()
-last_winner = None
 
 wiki = wikipediaapi.Wikipedia(
     language='en',
