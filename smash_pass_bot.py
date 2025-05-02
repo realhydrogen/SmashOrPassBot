@@ -240,7 +240,7 @@ async def smash(
         celeb1 = await get_random_celeb(gender)
         celeb2 = await get_random_celeb(gender)
 
-    if not celeb1 or not celeb2:
+if not celeb1 or not celeb2:
     await interaction.edit_original_response(content="❌ Couldn't fetch enough celebrity data. Try again!")
     return
 
