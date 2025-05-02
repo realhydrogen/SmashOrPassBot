@@ -144,6 +144,26 @@ async def get_wiki_celeb(gender="female", category="model"):
 
     return None
 
+async def get_random_celeb(gender="female"):
+    url = 'https://api.api-ninjas.com/v1/celebrity'
+    headers = {'X-Api-Key': os.getenv("API_NINJAS_KEY")}
+    params = {"gender": gender}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+            print(f"API Status: {response.status}")
+            print(f"API Response: {await response.text()}")
+            if response.status == 200:
+                data = await response.json()
+                if data:
+                    celeb = random.choice(data)
+                    image_url = f"https://ui-avatars.com/api/?name={celeb['name'].replace(' ', '+')}&background=random"
+                    return {
+                        "name": celeb["name"],
+                        "image": image_url
+                    }
+    return None
+
 async def get_wiki_image_for_name(name: str):
     search_url = "https://en.wikipedia.org/w/api.php"
     search_params = {
@@ -183,26 +203,6 @@ async def get_wiki_image_for_name(name: str):
                     "image": thumb
                 }
 
-    return None
-
-def get_random_celeb(gender="female"):
-    url = 'https://api.api-ninjas.com/v1/celebrity'
-    headers = {'X-Api-Key': os.getenv("API_NINJAS_KEY")}
-    params = {"gender": gender}
-
-    response = requests.get(url, headers=headers, params=params)
-    print(f"API Status: {response.status_code}")
-    print(f"API Response: {response.text}")  # <- Add this line
-
-    if response.status_code == 200:
-        data = response.json()
-        if data:
-            celeb = random.choice(data)
-            image_url = f"https://ui-avatars.com/api/?name={celeb['name'].replace(' ', '+')}&background=random"
-            return {
-                "name": celeb["name"],
-                "image": image_url
-            }
     return None
 
 def log_match(winner, loser, a_votes, b_votes, gender):
