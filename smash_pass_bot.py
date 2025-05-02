@@ -45,31 +45,33 @@ spotify = spotipy.Spotify(
 )
 
 async def get_musicbrainz_artist(gender="female"):
-    import urllib.parse
+    gender = gender.lower()
+    query = f"gender:{gender} AND type:person AND tag:music"
+    url = f"https://musicbrainz.org/ws/2/artist/?query={query}&fmt=json&limit=20"
 
-    base_url = "https://musicbrainz.org/ws/2/artist/"
-    query = f"gender:{gender} AND type:person"
-    params = {
-        "query": query,
-        "fmt": "json",
-        "limit": 25
-    }
     headers = {
-        "User-Agent": "SmashPassBot/1.0 (your_email@example.com)"
+        "User-Agent": "SmashPassBot/1.0 (https://example.com/contact)"
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(base_url, params=params, headers=headers) as resp:
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                return None
             data = await resp.json()
 
-    artists = [a for a in data.get("artists", []) if a.get("name")]
-    if not artists:
+    artists = data.get("artists", [])
+    filtered_artists = [a for a in artists if a.get("name")]
+
+    if not filtered_artists:
         return None
 
-    artist = random.choice(artists)
+    artist = random.choice(filtered_artists)
 
-    # Wikipedia image fallback
-    return await get_wiki_image_for_name(artist["name"])
+    return {
+        "name": artist["name"],
+        # Placeholder image or integrate a lookup (e.g. Wikipedia or Bing image)
+        "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ac/No_image_available.svg/480px-No_image_available.svg.png"
+    }
 
 async def get_tmdb_celeb(gender="female"):
     gender_code = 1 if gender == "female" else 2
@@ -140,11 +142,55 @@ async def get_wiki_celeb(gender="female", category="model"):
 
     return None
 
-async def get_random_celeb(gender="female", category="actor"):
+async def get_wiki_image_for_name(name: str):
+    search_url = "https://en.wikipedia.org/w/api.php"
+    search_params = {
+        "action": "query",
+        "format": "json",
+        "list": "search",
+        "srsearch": name,
+        "srlimit": 1
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(search_url, params=search_params) as resp:
+            search_data = await resp.json()
+
+        search_results = search_data.get("query", {}).get("search", [])
+        if not search_results:
+            return None
+
+        page_title = search_results[0]["title"]
+
+        image_params = {
+            "action": "query",
+            "format": "json",
+            "prop": "pageimages",
+            "titles": page_title,
+            "pithumbsize": 500
+        }
+        async with session.get(search_url, params=image_params) as resp:
+            image_data = await resp.json()
+
+        pages = image_data.get("query", {}).get("pages", {})
+        for page in pages.values():
+            thumb = page.get("thumbnail", {}).get("source")
+            if thumb:
+                return {
+                    "name": page_title,
+                    "image": thumb
+                }
+
+    return None
+
+async def get_random_celeb(gender="female", category="all"):
+    categories = ["actor", "singer", "model", "pornstar", "influencer"]
+    category = category if category != "all" else random.choice(categories)
+
     if category == "actor":
         return await get_tmdb_celeb(gender)
     elif category == "singer":
-        celeb = await get_spotify_artist(gender)
+        celeb = await get_musicbrainz_artist(gender)
         if celeb:
             return celeb
     elif category in ["model", "influencer", "pornstar"]:
@@ -351,7 +397,6 @@ async def top(interaction: discord.Interaction):
 
     await interaction.followup.send(embed=embed)
 
-@bot.event
 @bot.event
 async def on_ready():
     print(f"Bot is ready! Logged in as {bot.user} (ID: {bot.user.id})")
