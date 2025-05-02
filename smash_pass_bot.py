@@ -44,21 +44,32 @@ spotify = spotipy.Spotify(
     )
 )
 
-async def get_spotify_artist(gender="female"):
-    genre_pool = {
-        "female": ["pop", "r&b", "k-pop", "latin", "female vocalists"],
-        "male": ["rap", "rock", "hip hop", "male vocalists"]
+async def get_musicbrainz_artist(gender="female"):
+    import urllib.parse
+
+    base_url = "https://musicbrainz.org/ws/2/artist/"
+    query = f"gender:{gender} AND type:person"
+    params = {
+        "query": query,
+        "fmt": "json",
+        "limit": 25
     }
-    genre = random.choice(genre_pool[gender])
-    results = spotify.search(q=f'genre:"{genre}"', type="artist", limit=20)
-    artists = [a for a in results["artists"]["items"] if a.get("images")]
+    headers = {
+        "User-Agent": "SmashPassBot/1.0 (your_email@example.com)"
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(base_url, params=params, headers=headers) as resp:
+            data = await resp.json()
+
+    artists = [a for a in data.get("artists", []) if a.get("name")]
     if not artists:
         return None
+
     artist = random.choice(artists)
-    return {
-        "name": artist["name"],
-        "image": artist["images"][0]["url"]
-    }
+
+    # Wikipedia image fallback
+    return await get_wiki_image_for_name(artist["name"])
 
 async def get_tmdb_celeb(gender="female"):
     gender_code = 1 if gender == "female" else 2
@@ -75,43 +86,58 @@ async def get_tmdb_celeb(gender="female"):
             }
 
 async def get_wiki_celeb(gender="female", category="model"):
-    search_terms = {
-        "model": f"{gender} fashion model",
-        "pornstar": f"{gender} pornographic actor",
-        "influencer": f"{gender} social media influencer"
+    category_map = {
+        "model": "Category:Female_models",
+        "pornstar": "Category:American_female_pornographic_film_actors",
+        "influencer": "Category:Social_media_influencers"
     }
-    search_query = search_terms.get(category, f"{gender} celebrity")
 
+    if category == "all":
+        category = random.choice(["model", "pornstar", "influencer"])
+
+    wiki_category = category_map.get(category)
+    if not wiki_category:
+        return None
+
+    # Step 1: Get list of pages in the category
     async with aiohttp.ClientSession() as session:
-        search_url = "https://en.wikipedia.org/w/api.php"
-        search_params = {
+        url = "https://en.wikipedia.org/w/api.php"
+        params = {
             "action": "query",
             "format": "json",
-            "list": "search",
-            "srsearch": search_query,
-            "srlimit": 20
+            "list": "categorymembers",
+            "cmtitle": wiki_category,
+            "cmlimit": 20
         }
-        async with session.get(search_url, params=search_params) as resp:
+        async with session.get(url, params=params) as resp:
             data = await resp.json()
-        pages = data.get("query", {}).get("search", [])
+
+        pages = data.get("query", {}).get("categorymembers", [])
         if not pages:
             return None
+
         page_title = random.choice(pages)["title"]
 
-        image_params = {
+        # Step 2: Get image for selected page
+        params = {
             "action": "query",
             "format": "json",
             "prop": "pageimages",
             "titles": page_title,
             "pithumbsize": 500
         }
-        async with session.get(search_url, params=image_params) as resp:
+        async with session.get(url, params=params) as resp:
             image_data = await resp.json()
+
         image_pages = image_data.get("query", {}).get("pages", {})
         for page in image_pages.values():
             thumb = page.get("thumbnail", {}).get("source")
             if thumb:
-                return {"name": page_title, "image": thumb}
+                return {
+                    "name": page_title,
+                    "image": thumb
+                }
+
     return None
 
 async def get_random_celeb(gender="female", category="actor"):
@@ -147,7 +173,7 @@ def log_match(winner, loser, a_votes, b_votes, gender, category):
 )
 async def smash(interaction: discord.Interaction,
     gender: Literal["male", "female"] = "female",
-    category: Literal["actor", "singer", "model", "pornstar", "influencer"] = "actor",
+    category: Literal["all", "actor", "singer", "model", "pornstar", "influencer"] = "actor",
     duration: int = 10):
     await interaction.response.defer()
     if duration < 5 or duration > 60:
