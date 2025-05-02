@@ -326,10 +326,25 @@ async def top(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 @bot.event
+@bot.event
 async def on_ready():
-    for guild in bot.guilds:
-        await bot.tree.sync(guild=guild)
-        print(f"✅ Synced commands to guild: {guild.name} ({guild.id})")
-    print(f"{bot.user} is ready.")
+    print(f"Bot is ready! Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"Bot is in {len(bot.guilds)} guilds")
+    
+    try:
+        print("Attempting to sync commands...")
+        # Try global sync first
+        await bot.tree.sync()
+        print("Global sync completed!")
+        
+        # Then sync to each guild individually
+        for guild in bot.guilds:
+            try:
+                await bot.tree.sync(guild=guild)
+                print(f"✅ Synced commands to guild: {guild.name} ({guild.id})")
+            except Exception as e:
+                print(f"❌ Failed to sync to {guild.name}: {str(e)}")
+    except Exception as e:
+        print(f"Failed to sync commands: {str(e)}")
     
 bot.run(TOKEN)
