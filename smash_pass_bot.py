@@ -15,6 +15,8 @@ import wikipediaapi
 from typing import Literal
 import json
 from datetime import datetime
+import requests
+
 
 # Global lock and winner memory
 smash_lock = asyncio.Lock()
@@ -183,29 +185,30 @@ async def get_wiki_image_for_name(name: str):
 
     return None
 
-async def get_random_celeb(gender="female", category="all"):
-    categories = ["actor", "singer", "model", "pornstar", "influencer"]
-    category = category if category != "all" else random.choice(categories)
+async def get_random_celeb(gender="female"):
+    url = 'https://api.api-ninjas.com/v1/celebrity'
+    headers = {'X-Api-Key': os.getenv("API_NINJAS_KEY")}
+    params = {"gender": gender}
 
-    if category == "actor":
-        return await get_tmdb_celeb(gender)
-    elif category == "singer":
-        celeb = await get_musicbrainz_artist(gender)
-        if celeb:
-            return celeb
-    elif category in ["model", "influencer", "pornstar"]:
-        celeb = await get_wiki_celeb(gender, category)
-        if celeb:
-            return celeb
-    return await get_tmdb_celeb(gender)
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        data = response.json()
+        if data:
+            celeb = random.choice(data)
+            # Fallback image placeholder (no images in API, use your own logic if needed)
+            image_url = f"https://ui-avatars.com/api/?name={celeb['name'].replace(' ', '+')}&background=random"
+            return {
+                "name": celeb["name"],
+                "image": image_url
+            }
+    return None
 
-def log_match(winner, loser, a_votes, b_votes, gender, category):
+def log_match(winner, loser, a_votes, b_votes, gender):
     log_data = {
         "winner": winner,
         "loser": loser,
         "votes": {"🅰️": a_votes, "🅱️": b_votes},
         "gender": gender,
-        "category": category,
         "timestamp": datetime.utcnow().isoformat()
     }
     with open("match_log.json", "a") as f:
@@ -214,13 +217,13 @@ def log_match(winner, loser, a_votes, b_votes, gender, category):
 @bot.tree.command(name="smash", description="Vote on who you would smash")
 @app_commands.describe(
     gender="Choose male or female",
-    category="Choose a type of celebrity",
     duration="How many seconds to vote (5-60)"
 )
-async def smash(interaction: discord.Interaction,
+async def smash(
+    interaction: discord.Interaction,
     gender: Literal["male", "female"] = "female",
-    category: Literal["all", "actor", "singer", "model", "pornstar", "influencer"] = "actor",
-    duration: int = 10):
+    duration: int = 10
+):
     await interaction.response.defer()
     if duration < 5 or duration > 60:
         await interaction.followup.send("⏱ Duration must be between 5 and 60 seconds.", ephemeral=True)
@@ -229,8 +232,8 @@ async def smash(interaction: discord.Interaction,
         await interaction.followup.send("⚠️ A Smash or Pass match is already running. Please wait!", ephemeral=True)
         return
     async with smash_lock:
-        celeb1 = await get_random_celeb(gender, category)
-        celeb2 = await get_random_celeb(gender, category)
+        celeb1 = await get_random_celeb(gender)
+        celeb2 = await get_random_celeb(gender)
         if not celeb1 or not celeb2:
             await interaction.followup.send("❌ Couldn't fetch enough celebrity data. Try again!", ephemeral=True)
             return
@@ -285,7 +288,6 @@ async def smash(interaction: discord.Interaction,
             a_votes=a_votes,
             b_votes=b_votes,
             gender=gender,
-            category=category
         )
         global last_winner
         if winner != "It's a tie!":
@@ -293,7 +295,6 @@ async def smash(interaction: discord.Interaction,
                 "name": celeb1["name"] if winner == celeb1["name"] else celeb2["name"],
                 "image": celeb1["image"] if winner == celeb1["name"] else celeb2["image"],
                 "gender": gender,
-                "category": category
             }
         await interaction.followup.send(f"""
 🅰️ {celeb1['name']}: {a_votes} votes  
@@ -308,7 +309,7 @@ async def smashing(interaction: discord.Interaction):
     if not last_winner:
         await interaction.followup.send("⚠️ No previous winner found. Run `/smash` first!", ephemeral=True)
         return
-    new_celeb = await get_random_celeb(last_winner["gender"], last_winner["category"])
+    new_celeb = await get_random_celeb(last_winner["gender"])
     if not new_celeb:
         await interaction.followup.send("❌ Couldn't fetch a new contender. Try again!", ephemeral=True)
         return
